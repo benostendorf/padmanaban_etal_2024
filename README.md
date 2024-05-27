@@ -9,11 +9,11 @@ Veena Padmanaban, Isabel Keller, Ethan S. Seltzer, Benjamin N. Ostendorf, Zachar
 *doi*: []()
 
 ### Overview
-| Analysis                                             | Main code file                                                    |
-|-----------------------------------------------------|--------------------------------------------------------------|
-| GSEA of shTlr7 versus shCtrl 4T1-derived spheroids    | [RNAseq_spheroids/GSEA_shTlr7_spheroids.R](RNAseq_spheroids/GSEA_shTlr7_spheroids.R)  |
-| Association between a TLR7-dependent signature and survival in TCGA breast cancer patients    | [TCGA/01_TCGA.Rmd](TCGA/01_TCGA.Rmd)  |
-| Association between a TLR7-dependent signature and survival in METABRIC breast cancer patients    | [METABRIC/01_METABRIC_Tlr7_signature.Rmd](METABRIC/01_METABRIC_Tlr7_signature.Rmd) |
+| Analysis                                             | Folder |   Main code file                                                    |
+|-----------------------------------------------------|-----------------------------------------------------|--------------------------------------------------------------|
+| GSEA of shTlr7 versus shCtrl 4T1-derived spheroids    | [RNAseq_spheroids](RNAseq_spheroids)  |   [GSEA_shTlr7_spheroids.R](RNAseq_spheroids/GSEA_shTlr7_spheroids.R)  |
+| Association between a TLR7-dependent signature and survival in TCGA breast cancer patients    | [TCGA](TCGA)  |   [01_TCGA.Rmd](TCGA/01_TCGA.Rmd)  |
+| Association between a TLR7-dependent signature and survival in METABRIC breast cancer patients  |  [METABRIC](METABRIC) | [01_METABRIC_Tlr7_signature.Rmd](METABRIC/01_METABRIC_Tlr7_signature.Rmd) |
 
 
 ### GEO upload for RNA-seq of 4T1 spheroids (GSE267958)
