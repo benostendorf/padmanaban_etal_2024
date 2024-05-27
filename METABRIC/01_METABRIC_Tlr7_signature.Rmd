@@ -1,0 +1,138 @@
+---
+title: "Impact of Tlr7-dependent signature in METABRIC cohort"
+output: github_document
+author: "Benjamin N. Ostendorf"
+editor_options: 
+  chunk_output_type: console
+---
+
+## Load libraries
+```{r}
+library(RColorBrewer)
+library(data.table)
+library(survival)
+library(forestmodel)
+library(illuminaHumanv3.db)
+library(AnnotationDbi)
+library(tidyverse)
+
+source("helper_functions.R")
+```
+
+```{r}
+## Read in normalized expression data
+data_raw_validation <- fread("ega-box-04_validation_ExpressionMatrix.txt")
+
+## Add Entrez IDs
+ensembl <-
+  mapIds(
+    illuminaHumanv3.db,
+    keys = data_raw_validation$V1,
+    column = "ENSEMBL",
+    keytype = "PROBEID",
+    multiVals = "first"
+  )
+
+## Wrangle data (remove rows without ensembl_IDs)
+data_renamed <- data_raw_validation
+data_renamed[, 1] <- ensembl
+setnames(data_renamed, old = "V1", new = "ensembl")
+data_filt <- data_renamed[!is.na(ensembl)]
+
+## Remove duplicated ensembl rows, retain highest expressing
+order_df <- tibble(rowsums = rowSums(data_filt[, -1]),
+                   ensembl = data_filt$ensembl)
+order_vct <- order(order_df$ensembl, order_df$rowsums, decreasing = TRUE)
+data_ordered <- data_filt[order_vct, ]
+dup <- duplicated(data_ordered$ensembl)
+data_dedup <- data_ordered[!dup, ]
+
+df <- data.frame(data_dedup[, 2:ncol(data_dedup)])
+rownames(df) <- data_dedup$ensembl
+
+## Normalize across patients by subtracting average among all samples
+counts_centered_all <- df - rowMeans(df)
+colnames(counts_centered_all) <- gsub("MB\\.", "MB-", colnames(counts_centered_all))
+counts_centered <- counts_centered_all[rowSums(is.na(counts_centered_all)) <= 500, ]
+```
+
+## Import clinical data
+```{r}
+## Here, manually download clinical data fro METABRIC from http://www.cbioportal.org/study/clinicalData?id=brca_metabric 
+clinical_raw <- read_tsv("brca_metabric_clinical_data.tsv", col_names = TRUE)
+colnames(clinical_raw) <- gsub(colnames(clinical_raw), pattern = " |\\(|\\)|\\+|\\-", replacement = "")
+clinical <-
+  clinical_raw |>
+  mutate(time = OverallSurvivalMonths * 365.25/12, 
+         status = case_when(OverallSurvivalStatus == "LIVING" ~ 0, 
+                            OverallSurvivalStatus == "DECEASED" ~ 1, 
+                            TRUE ~ NA_real_), 
+         patient = gsub("-", "_", PatientID), 
+         stage_cat = case_when(TumorStage == 0 ~ "0/1", 
+                                 TumorStage == 1 ~ "0/1", 
+                                 TumorStage == 2 ~ "II", 
+                                 TumorStage == 3 ~ "III", 
+                                 TumorStage == 4 ~ "IV", 
+                                 TRUE ~ NA_character_), 
+         IHC_subtype = case_when(HER2Status == "Positive" ~ "HER2pos",
+                                 is.na(HER2Status) ~ NA_character_,
+                                 ERStatus == "Positive" | PRStatus == "Positive" ~ "HRpos",
+                                 ERStatus == "Negative" & PRStatus == "Negative" & HER2Status == "Negative" ~ "TNBC",
+                                 TRUE ~ NA_character_)) |>
+  dplyr::rename(age = AgeatDiagnosis)
+```
+
+## Calculate signature
+```{r}
+source("gene_signature_microarray.R")
+
+## Import downregulated genes upon Tlr7-knockdown in 4T1 spheroids
+genes_dn_hs <- scan("genes_dn_hs.txt", 
+                    what = "character")
+
+signature_score <- signature_score(se = counts_centered, 
+                                   signature = genes_dn_hs)
+colnames(signature_score) <- c("signature_cont", "PatientID", "signature_rank")
+
+## Join survival and signature scores
+df_joined <- 
+  left_join(clinical, signature_score) |>
+  mutate(signature_groups = case_when(signature_cont > median(signature_score$signature_cont) ~ "high", 
+                                      TRUE ~ "low")) |>
+  mutate(signature_quartiles = case_when(
+    signature_cont <= quantile(signature_score$signature_cont)[2] ~ "first_quartile", 
+    signature_cont <= quantile(signature_score$signature_cont)[3] ~ "second_quartile", 
+    signature_cont <= quantile(signature_score$signature_cont)[4] ~ "third_quartile", 
+    signature_cont > quantile(signature_score$signature_cont)[4] ~ "fourth_quartile"))
+```
+
+## Multivariate model - OS
+```{r}
+## -----------------------------------------------
+## Multivar analysis
+## -----------------------------------------------
+fm_df <- 
+  df_joined |>
+  as_tibble() |>
+  rename(Age = age, 
+         Stage = stage_cat, 
+         Subtype = Pam50Claudinlowsubtype, 
+         Signature = signature_rank) |>
+  filter(Stage != "NA") |>
+  filter(Subtype != "NC") |>
+  mutate(Subtype = relevel(as.factor(as.character(Subtype)), ref = "LumA"))
+
+fm_BRCA <-
+  forest_model(
+    coxph(Surv(time, status) ~ Age + Stage + Signature, data = fm_df),
+    format_options =
+      forest_model_format_options(text_size = 1.66, point_size = 1, banded = TRUE), 
+    factor_separate_line = TRUE, 
+    panels = custom_fm_panels, 
+    recalculate_width = FALSE)  +
+  labs(title = "Multivariate analysis") +
+  NULL
+
+print(fm_BRCA)
+```
+

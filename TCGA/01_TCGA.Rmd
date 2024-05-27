@@ -1,0 +1,99 @@
+---
+title: "01_202208_spheroids"
+author: "Benjamin N. Ostendorf"
+date: "10/16/2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+## Preamble
+```{r}
+library(DESeq2)
+library(data.table)
+library(TCGAbiolinks)
+library(lemon)
+library(survival)
+library(survminer)
+library(forestmodel)
+library(SummarizedExperiment)
+library(tidyverse)
+
+source("helper_functions.R")
+```
+
+## Import data
+```{r}
+if (!file.exists("genes_dn_hs.txt")) {
+  
+  ## Import dds
+  dds <- readRDS("data/dds_spheroids.rds")
+  
+  ## Import DE results/all_samples with shrunken LFCs
+  res <- 
+    results(dds, contrast=c("condition", "shTlr7", "shCtrl")) |>
+    as_tibble(rownames = "symbol")
+  res_dds <- 
+    results(dds, contrast = c("condition", "shTlr7", "shCtrl"))
+  resLFC <- 
+    lfcShrink(dds, contrast = c("condition", "shTlr7", "shCtrl"),
+              res = res_dds, type = "ashr") |>
+    as_tibble(rownames = "symbol")
+  
+  ## Get genes  downregulated in shTlr7
+  genes_dn <- 
+    res_dds |>
+    as_tibble(rownames = "gene") |>
+    filter(padj < 0.1, log2FoldChange < 0) |>
+    pull(gene)
+  
+  source("human_ortholog_geneset.R")
+  genes_dn_hs <- convert_mouse_to_human(genes_dn)
+  write(genes_dn_hs, "genes_dn_hs.txt")  
+}
+genes_dn_hs <- scan("genes_dn_hs.txt", what = "character")
+```
+
+## Import TCGA-BRCA expression data
+```{r}
+source("get_TCGA_data.R")
+source("gene_signature.R")
+
+BRCA_dds <- DESeqDataSet(se = BRCA_se, design = ~ 1)
+BRCA_dds <- estimateSizeFactors(BRCA_dds)
+signature_scores <- 
+  signature_score(BRCA_dds, genes_dn_hs)
+
+sum(!BRCA_dds$patient == signature_scores$UID)
+BRCA_dds$signature <- signature_scores$signature
+BRCA_dds$signature_rank <- signature_scores$genes_dn_hs_rank
+BRCA_dds$signature_cont <- signature_scores$genes_dn_hs
+```
+
+## Multivariate model - OS
+```{r}
+## -----------------------------------------------
+## Multivar analysis
+## -----------------------------------------------
+fm_df <- 
+  colData(BRCA_dds) |>
+  as_tibble() |>
+  rename(Age = age_at_initial_pathologic_diagnosis, 
+         Stage = paper_pathologic_stage, 
+         Signature = signature_rank) |>
+  filter(Stage != "NA")
+
+fm_BRCA <-
+  forest_model(
+    coxph(Surv(OS.time, OS) ~ Age + Stage + Signature, data = fm_df),
+    format_options =
+      forest_model_format_options(text_size = 1.66, point_size = 1, banded = TRUE), 
+    factor_separate_line = TRUE, 
+    panels = custom_fm_panels, 
+    recalculate_width = FALSE)  +
+  theme_custom2 +
+  labs(title = "Multivariate analysis") +
+  NULL
+
+print(fm_BRCA)
+```
